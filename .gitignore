@@ -1,0 +1,20 @@
+# 정리 전 옛 파일/실험물 (git 추적 제외)
+기타/
+
+# 파이썬
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 실행 산출물
+artifacts/
+*.png
+report.html
+*.xml
+
+# OS/IDE
+.DS_Store
+.omc/
+.idea/
+.vscode/

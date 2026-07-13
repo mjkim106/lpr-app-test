@@ -1,0 +1,8 @@
+# PLUS RUN Appium 테스트 설정 (환경변수로 override 가능: PLUSRUN_DEVICE 등)
+device: emulator-5554
+app_package: com.hanwha.plus.pr.stg
+app_activity: com.hanwha.plus.pr.MainActivity
+appium_url: http://127.0.0.1:4723
+login_email: mjkim103301@naver.com   # 디버그 빌드 카카오 우회(e2e_login_email)
+gpx_file: data/goguma_course.gpx
+speed: 1.0                            # 1.0=실시간(≈26.5분), >1=배속(단 페이스 빨라져 기록 삭제 위험)
