@@ -21,3 +21,6 @@ report.html
 
 # Excel 임시/잠금 파일
 ~$*
+
+# 실행 이력
+data/run_history.json

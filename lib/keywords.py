@@ -15,6 +15,20 @@ CTA_ENTER = (534, 1662)    # 홈 카드 'N명 도전중' 진입 좌표
 CTA_BOTTOM = (534, 2172)   # 하단 주버튼 좌표(1080x2400 기준)
 DLG_DISMISS = (346, 1350)
 
+# 액션 레지스트리 — 대시보드/러너/문서가 공유하는 단일 소스.
+# 신규 action 추가 시: (1) KeywordRunner 에 메서드 추가 (2) 여기에 한 줄 등록.
+ACTIONS = {
+    "launch":            {"desc": "앱 새로 실행(로그인 우회)+홈 대기", "needs_target": False},
+    "tap_text":          {"desc": "target 텍스트 요소를 찾아 탭",       "needs_target": True,  "target_hint": "화면 텍스트"},
+    "tap_bottom":        {"desc": "하단 주버튼 탭",                      "needs_target": False},
+    "back":              {"desc": "안드로이드 뒤로가기",                 "needs_target": False},
+    "wait":              {"desc": "target(초)만큼 대기",                "needs_target": True,  "target_hint": "초"},
+    "assert_visible":    {"desc": "target 텍스트가 보이면 통과",         "needs_target": True,  "target_hint": "기대 텍스트"},
+    "assert_not_visible":{"desc": "target 텍스트가 없으면 통과",         "needs_target": True,  "target_hint": "사라질 텍스트"},
+    "start_challenge":   {"desc": "챌린지 진입~시작하기 자동",            "needs_target": False},
+    "play_gpx":          {"desc": "GPX 배속 재생→완주/결과 대기",         "needs_target": True,  "target_hint": "배속(예:1.15)"},
+}
+
 
 class KeywordRunner:
     def __init__(self, driver, config, adb_path):

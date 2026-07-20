@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PLUS RUN 테스트 대시보드</title>
+<style>
+  :root{--bg:#0f172a;--panel:#1e293b;--line:#334155;--mut:#94a3b8;--accent:#4a90d9;--ok:#16a34a;--del:#dc2626;--warn:#f59e0b;}
+  *{box-sizing:border-box;} body{margin:0;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;background:#f5f7fa;color:#1e293b;}
+  header{background:var(--bg);color:#fff;padding:12px 20px;display:flex;align-items:center;gap:16px;}
+  header h1{font-size:16px;margin:0;}
+  .tabs{display:flex;gap:6px;margin-left:8px;}
+  .tab{padding:6px 14px;border-radius:7px;cursor:pointer;font-size:13px;color:#cbd5e1;}
+  .tab.active{background:#334155;color:#fff;font-weight:600;}
+  .wrap{display:flex;height:calc(100vh - 46px);}
+  .left{width:290px;border-right:1px solid #e5e7eb;background:#fff;overflow-y:auto;flex-shrink:0;}
+  .left h2{font-size:13px;color:#64748b;padding:14px 16px 8px;margin:0;}
+  .uploadbar{padding:10px 16px;border-bottom:1px solid #f1f5f9;}
+  .uploadbar label{display:block;padding:9px;border:1px dashed #cbd5e1;border-radius:8px;text-align:center;cursor:pointer;font-size:13px;color:#475569;background:#fafcff;}
+  .uploadbar input{display:none;}
+  .case-item{padding:12px 16px;border-bottom:1px solid #f1f5f9;cursor:pointer;}
+  .case-item:hover{background:#f8fafc;} .case-item.active{background:#eef4fc;border-left:3px solid var(--accent);}
+  .case-item .tc{font-weight:700;font-size:13px;} .case-item .nm{font-size:12px;color:#64748b;margin-top:2px;}
+  .case-item .cnt{font-size:11px;color:#94a3b8;}
+  .newbtn{margin:12px 16px;padding:9px;width:calc(100% - 32px);border:1px dashed #cbd5e1;background:#fff;border-radius:8px;cursor:pointer;color:#475569;font-size:13px;}
+  .right{flex:1;overflow-y:auto;padding:22px 26px;}
+  .empty{color:#94a3b8;margin-top:40px;text-align:center;}
+  .meta{display:flex;gap:10px;align-items:center;margin-bottom:16px;}
+  .meta input{padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;}
+  .meta .tcid{width:150px;font-weight:700;} .meta .nm{flex:1;}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);}
+  th{background:#f8fafc;font-size:12px;color:#64748b;text-align:left;padding:10px;border-bottom:1px solid #eee;}
+  td{padding:8px 10px;border-bottom:1px solid #f1f5f9;vertical-align:middle;font-size:13px;}
+  td select,td input{width:100%;padding:7px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;}
+  .hint{font-size:11px;color:#94a3b8;margin-top:3px;}
+  .rowbtns button{border:none;background:#f1f5f9;border-radius:5px;padding:5px 8px;cursor:pointer;margin:0 2px;}
+  .rowbtns button:hover{background:#e2e8f0;}
+  .toolbar{margin-top:16px;display:flex;gap:8px;}
+  button.pri{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:9px 16px;cursor:pointer;font-size:13px;}
+  button.run{background:var(--ok);color:#fff;border:none;border-radius:6px;padding:9px 16px;cursor:pointer;font-size:13px;}
+  button.danger{background:#fff;border:1px solid #fca5a5;color:var(--del);border-radius:6px;padding:9px 16px;cursor:pointer;font-size:13px;}
+  .addstep{margin-top:10px;padding:8px 12px;border:1px dashed #cbd5e1;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;color:#475569;}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;}
+  .b-pass{background:#dcfce7;color:#15803d;} .b-fail{background:#fee2e2;color:#b91c1c;}
+  .b-running{background:#fef9c3;color:#a16207;} .b-none,.b-skipped{background:#e2e8f0;color:#475569;}
+  .results-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+  .stat{display:flex;gap:10px;} .stat .card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 16px;min-width:80px;}
+  .stat .card b{display:block;font-size:20px;} .stat .card span{font-size:11px;color:#64748b;}
+  #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;z-index:9;}
+  #toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<header>
+  <h1>PLUS RUN 테스트 대시보드</h1>
+  <div class="tabs">
+    <div class="tab active" id="tab-tests" onclick="showTab('tests')">테스트</div>
+    <div class="tab" id="tab-results" onclick="showTab('results')">실행 결과</div>
+  </div>
+</header>
+
+<!-- 테스트 탭 -->
+<div class="wrap" id="view-tests">
+  <div class="left">
+    <div class="uploadbar">
+      <label>📁 엑셀 업로드 (testcases.xlsx)
+        <input type="file" accept=".xlsx" onchange="uploadExcel(this)">
+      </label>
+    </div>
+    <h2>테스트 목록</h2>
+    <div id="caseList"></div>
+    <button class="newbtn" onclick="newCase()">+ 새 테스트</button>
+  </div>
+  <div class="right" id="editor"><div class="empty">왼쪽에서 테스트를 선택하세요.</div></div>
+</div>
+
+<!-- 실행 결과 탭 -->
+<div class="right" id="view-results" style="display:none">
+  <div class="results-head">
+    <div class="stat" id="stat"></div>
+    <button class="pri" onclick="loadHistory()">새로고침</button>
+  </div>
+  <table>
+    <thead><tr><th>결과</th><th>TC</th><th>시작 시각</th><th>종료 시각</th><th>소요(초)</th><th>상세</th></tr></thead>
+    <tbody id="histBody"></tbody>
+  </table>
+</div>
+
+<div id="toast"></div>
+<script>
+let ACTIONS={}, CASES=[], curIdx=-1, tab='tests', histTimer=null, LATEST={}, listTimer=null;
+
+async function boot(){
+  ACTIONS = await (await fetch('/api/actions')).json();
+  await loadCases();
+  refreshLatest();
+  listTimer=setInterval(refreshLatest,5000);  // 목록의 결과 뱃지 주기적 갱신
+}
+async function loadCases(){
+  CASES = await (await fetch('/api/cases')).json();
+  if(CASES.error){ toast('엑셀 로드 실패: '+CASES.error); CASES=[]; }
+  renderList();
+}
+async function refreshLatest(){
+  try{ LATEST = await (await fetch('/api/latest')).json(); renderList(); }catch(e){}
+}
+function badge(tc){
+  const r=LATEST[tc]; if(!r||!r.status) return '';
+  const label={pass:'성공',fail:'실패',running:'실행중',none:'매칭없음',skipped:'SKIP'};
+  const t=r.ended||r.started||'';
+  return `<span class="badge b-${r.status}" title="${esc(t)}">${label[r.status]||r.status}</span>`;
+}
+function renderList(){
+  document.getElementById('caseList').innerHTML = CASES.map((c,i)=>`
+    <div class="case-item ${i===curIdx?'active':''}" onclick="select(${i})">
+      <div class="tc">${esc(c.tc)} ${badge(c.tc)}</div>
+      <div class="nm">${esc(c.name||'(이름 없음)')}</div>
+      <div class="cnt">${(c.steps||[]).length} 스텝${latestTime(c.tc)}</div></div>`).join('')
+    || '<div class="empty" style="margin:20px;font-size:13px">엑셀을 업로드하세요.</div>';
+}
+function latestTime(tc){ const r=LATEST[tc]; return (r&&r.ended)?` · 최근 ${esc(r.ended.slice(5,16))}`:''; }
+function select(i){ curIdx=i; renderList(); renderEditor(); }
+function actionOptions(sel){ return Object.keys(ACTIONS).map(a=>`<option value="${a}" ${a===sel?'selected':''}>${a} — ${esc(ACTIONS[a].desc)}</option>`).join(''); }
+function renderEditor(){
+  const c=CASES[curIdx];
+  const rows=(c.steps||[]).map((s,j)=>{
+    const meta=ACTIONS[s.action]||{needs_target:true};
+    const hint=meta.target_hint?`<div class="hint">${esc(meta.target_hint)}</div>`:'';
+    return `<tr><td style="width:34px;color:#94a3b8">${j+1}</td>
+      <td style="width:240px"><select onchange="upd(${j},'action',this.value)">${actionOptions(s.action)}</select></td>
+      <td><input value="${esc(s.target||'')}" ${meta.needs_target?'':'disabled'} placeholder="${meta.needs_target?'target':'—'}" onchange="upd(${j},'target',this.value)">${hint}</td>
+      <td style="width:160px"><input value="${esc(s.note||'')}" placeholder="비고" onchange="upd(${j},'note',this.value)"></td>
+      <td class="rowbtns" style="width:120px;white-space:nowrap">
+        <button onclick="move(${j},-1)">↑</button><button onclick="move(${j},1)">↓</button><button onclick="delStep(${j})">🗑</button></td></tr>`;
+  }).join('');
+  document.getElementById('editor').innerHTML=`
+    <div class="meta"><input class="tcid" value="${esc(c.tc)}" onchange="setField('tc',this.value)" placeholder="TC id">
+      <input class="nm" value="${esc(c.name||'')}" onchange="setField('name',this.value)" placeholder="테스트 이름"></div>
+    <table><thead><tr><th>#</th><th>action</th><th>target</th><th>비고</th><th>이동/삭제</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan=5 style="color:#94a3b8;padding:16px">스텝이 없습니다.</td></tr>'}</tbody></table>
+    <button class="addstep" onclick="addStep()">+ 스텝 추가</button>
+    <div class="toolbar"><button class="pri" onclick="saveAll()">저장</button>
+      <button class="run" onclick="runCase()">▶ 실행</button>
+      <button class="danger" onclick="delCase()">테스트 삭제</button></div>`;
+}
+function upd(j,k,v){ CASES[curIdx].steps[j][k]=v; if(k==='action') renderEditor(); }
+function setField(k,v){ CASES[curIdx][k]=v; renderList(); }
+function addStep(){ CASES[curIdx].steps.push({action:'tap_text',target:'',note:''}); renderEditor(); }
+function delStep(j){ CASES[curIdx].steps.splice(j,1); renderEditor(); }
+function move(j,d){ const s=CASES[curIdx].steps,t=j+d; if(t<0||t>=s.length)return; [s[j],s[t]]=[s[t],s[j]]; renderEditor(); }
+function newCase(){ CASES.push({tc:'TC_NEW',name:'새 테스트',steps:[{action:'launch',target:'',note:''}]}); curIdx=CASES.length-1; renderList(); renderEditor(); }
+function delCase(){ if(!confirm('이 테스트를 삭제할까요?'))return; CASES.splice(curIdx,1); curIdx=-1; renderList(); document.getElementById('editor').innerHTML='<div class="empty">왼쪽에서 테스트를 선택하세요.</div>'; }
+async function saveAll(){ const j=await (await fetch('/api/cases',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(CASES)})).json(); toast(j.ok?`저장됨 (${j.count} 테스트)`:'저장 실패'); }
+async function runCase(){ const c=CASES[curIdx]; await saveAll(); const j=await (await fetch('/api/run/'+encodeURIComponent(c.tc),{method:'POST'})).json(); toast(j.ok?`실행 시작: ${c.tc} → '실행 결과' 탭에서 확인`:'실행 실패'); }
+async function uploadExcel(inp){
+  if(!inp.files.length)return; const fd=new FormData(); fd.append('file',inp.files[0]);
+  const j=await (await fetch('/api/upload',{method:'POST',body:fd})).json();
+  if(j.ok){ CASES=j.cases; curIdx=-1; renderList(); document.getElementById('editor').innerHTML='<div class="empty">테스트가 로드되었습니다. 선택하세요.</div>'; toast(`업로드 완료 (${j.count} 테스트)`); }
+  else toast('업로드 실패: '+(j.error||'')); inp.value='';
+}
+// ----- 실행 결과 탭 -----
+function showTab(t){
+  tab=t;
+  document.getElementById('tab-tests').classList.toggle('active',t==='tests');
+  document.getElementById('tab-results').classList.toggle('active',t==='results');
+  document.getElementById('view-tests').style.display = t==='tests'?'flex':'none';
+  document.getElementById('view-results').style.display = t==='results'?'block':'none';
+  if(t==='results'){ loadHistory(); histTimer=setInterval(loadHistory,5000); }
+  else if(histTimer){ clearInterval(histTimer); histTimer=null; }
+}
+async function loadHistory(){
+  const h=await (await fetch('/api/history')).json();
+  const cnt={pass:0,fail:0,running:0};
+  h.forEach(r=>{ if(cnt[r.status]!=null)cnt[r.status]++; });
+  document.getElementById('stat').innerHTML=`
+    <div class="card"><b>${h.length}</b><span>전체 실행</span></div>
+    <div class="card"><b style="color:#16a34a">${cnt.pass}</b><span>PASS</span></div>
+    <div class="card"><b style="color:#b91c1c">${cnt.fail}</b><span>FAIL</span></div>
+    <div class="card"><b style="color:#a16207">${cnt.running}</b><span>실행중</span></div>`;
+  const label={pass:'PASS',fail:'FAIL',running:'실행중',none:'매칭없음',skipped:'SKIP'};
+  document.getElementById('histBody').innerHTML = h.map(r=>`
+    <tr><td><span class="badge b-${r.status}">${label[r.status]||r.status}</span></td>
+      <td><b>${esc(r.tc)}</b></td><td>${esc(r.started||'')}</td><td>${esc(r.ended||'-')}</td>
+      <td>${r.duration!=null?r.duration:'-'}</td><td style="color:#94a3b8;font-size:12px">${esc(r.detail||'')}</td></tr>`).join('')
+    || '<tr><td colspan=6 style="color:#94a3b8;padding:16px">실행 이력이 없습니다.</td></tr>';
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
+boot();
+</script>
+</body>
+</html>
