@@ -199,5 +199,27 @@ def api_run(tc):
     return jsonify({"ok": True, "run": rec})
 
 
+def _lan_ip():
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    # 같은 Wi-Fi(LAN)에서 접속 가능하도록 0.0.0.0 바인딩 (외부 인터넷 노출 아님)
+    host = os.environ.get("PLUSRUN_HOST", "0.0.0.0")
+    port = int(os.environ.get("PLUSRUN_PORT", "5050"))  # 5000은 macOS AirPlay가 점유
+    ip = _lan_ip()
+    print("=" * 56)
+    print(" PLUS RUN 테스트 대시보드")
+    print(f"  이 컴퓨터:      http://127.0.0.1:{port}")
+    print(f"  같은 Wi-Fi 접속: http://{ip}:{port}   ← 이 링크를 공유하세요")
+    print("  (같은 네트워크에 연결된 사람만 접속 가능 / 외부 인터넷 불가)")
+    print("=" * 56)
+    app.run(host=host, port=port, debug=False, threaded=True)
