@@ -43,6 +43,7 @@
   .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;}
   .b-pass{background:#dcfce7;color:#15803d;} .b-fail{background:#fee2e2;color:#b91c1c;}
   .b-running{background:#fef9c3;color:#a16207;} .b-none,.b-skipped{background:#e2e8f0;color:#475569;}
+  .b-stopped{background:#fde4e1;color:#b91c1c;}
   #view-results{overflow:auto;}
   #view-results table th, #view-results table td{white-space:nowrap;}         /* 줄바꿈 방지 */
   #view-results table td.detail{white-space:normal;max-width:420px;}          /* 상세만 줄바꿈 허용 */
@@ -270,9 +271,12 @@ async function loadHistory(){
     <div class="card"><b style="color:#16a34a">${cnt.pass}</b><span>PASS</span></div>
     <div class="card"><b style="color:#b91c1c">${cnt.fail}</b><span>FAIL</span></div>
     <div class="card"><b style="color:#a16207">${cnt.running}</b><span>실행중</span></div>`;
-  const label={pass:'PASS',fail:'FAIL',running:'실행중',none:'매칭없음',skipped:'SKIP'};
+  const label={pass:'PASS',fail:'FAIL',running:'실행중',none:'매칭없음',skipped:'SKIP',stopped:'중지됨'};
   document.getElementById('histBody').innerHTML = h.map(r=>`
-    <tr><td><span class="badge b-${r.status}">${label[r.status]||r.status}</span></td>
+    <tr><td>
+        <span class="badge b-${r.status}">${label[r.status]||r.status}</span>
+        ${r.status==='running'?`<button class="danger" style="padding:4px 10px;margin-left:6px" onclick="stopRun('${esc(r.id)}')">■ 중지</button>`:''}
+      </td>
       <td><b>${esc(r.tc)}</b></td><td>${esc(r.started||'')}</td><td>${esc(r.ended||'-')}</td>
       <td>${r.duration!=null?r.duration:'-'}</td>
       <td>${r.has_shot?`<button class="run" style="padding:5px 12px" onclick="showShot('${esc(r.id)}','${esc(r.tc)} · ${esc(r.ended||'')}${r.has_gif?' · GIF':''}')">${r.has_gif?'🎞':'🖼'} 보기</button>`:'<span style="color:#cbd5e1">-</span>'}</td>
@@ -292,6 +296,12 @@ function replayShot(){  // src 재설정 → GIF 처음부터 1회 재생
   img.src=''; img.src='/api/shot/'+encodeURIComponent(curShotId)+'?t='+Date.now();
 }
 function closeShot(){ document.getElementById('shotModal').style.display='none'; }
+async function stopRun(runId){
+  if(!confirm('이 테스트 실행을 중지할까요?'))return;
+  const j=await (await fetch('/api/stop/'+encodeURIComponent(runId),{method:'POST'})).json();
+  toast(j.ok?'중지 요청됨':'중지 실패: '+(j.error||''));
+  loadHistory();
+}
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
 boot();

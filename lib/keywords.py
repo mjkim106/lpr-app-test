@@ -25,6 +25,7 @@ ACTIONS = {
     "wait":              {"desc": "target(초)만큼 대기",                "needs_target": True,  "target_hint": "초"},
     "assert_visible":    {"desc": "target 텍스트가 보이면 통과",         "needs_target": True,  "target_hint": "기대 텍스트"},
     "assert_not_visible":{"desc": "target 텍스트가 없으면 통과",         "needs_target": True,  "target_hint": "사라질 텍스트"},
+    "assert_winner":     {"desc": "결과화면 승자(WINNER 아래 이름)가 target 인지", "needs_target": True, "target_hint": "승자 이름(예:원형석)"},
     "start_challenge":   {"desc": "챌린지 진입~시작하기 자동",            "needs_target": False},
     "play_gpx":          {"desc": "GPX 배속 재생→완주/결과 대기",         "needs_target": True,  "target_hint": "배속(예:1.15)"},
 }
@@ -95,6 +96,29 @@ class KeywordRunner:
     def assert_not_visible(self, target):
         assert target not in self._src(), f"assert_not_visible 실패: '{target}' 이(가) 화면에 여전히 보임"
 
+    def assert_winner(self, target):
+        """대결 결과 화면에서 'WINNER' 헤더 바로 아래(=승자) 이름이 target 인지 위치로 판정.
+        승/패 화면 모두 'WINNER'가 있어 텍스트만으론 구분 불가 → 최상단 승자 이름으로 판정."""
+        items = []
+        try:
+            els = self.d.find_elements(AppiumBy.XPATH, "//*[string-length(@text)>0]")
+        except Exception:
+            els = []
+        for e in els:
+            try:
+                t = (e.text or "").strip()
+                r = e.rect
+                if t:
+                    items.append((r["y"], r["x"], t))
+            except Exception:
+                pass
+        assert items, "화면에서 텍스트 요소를 찾지 못함"
+        wy = next((y for (y, x, t) in items if "WINNER" in t), None)
+        assert wy is not None, "결과(WINNER) 화면이 아님"
+        below = sorted([(y, x, t) for (y, x, t) in items if y > wy])
+        winner = below[0][2] if below else ""
+        assert target in winner, f"승자='{winner}' (기대 '{target}')"
+
     # ---- 팝업 자동 처리(챌린지 진입 중 끼어드는 다이얼로그) ----
     def _click_text(self, text):
         try:
@@ -139,12 +163,17 @@ class KeywordRunner:
             if self._handle_popup(s):
                 continue
             if "준비되셨다면" in s or "시작하기" in s or "코스 출발점" in s:
-                if start:                            # 출발점(초록 원) 진입
-                    self._geo_fix(*start); time.sleep(2)
-                self._tap_frac(*CTA_BOTTOM)          # 시작하기
-                time.sleep(2)
-                self._handle_popup(self._src())
-                return
+                # 출발점 지오펜스 진입 → 시작하기 탭. '중단하기'(러닝중) 뜰 때까지 재시도.
+                for _ in range(6):
+                    if start:
+                        self._geo_fix(*start)
+                    time.sleep(2)
+                    self._tap_frac(*CTA_BOTTOM)      # 시작하기
+                    time.sleep(3)
+                    self._handle_popup(self._src())
+                    if "중단하기" in self._src():     # 러닝 시작 확인
+                        return
+                return  # 6회 시도 후에도 미시작이면 최선으로 진행
             if "대결 상대" in s:
                 self._tap_frac(*CTA_BOTTOM)          # 원형석 기본 선택 → 선택
             elif "Challenge Guide" in s or "러닝 방향" in s or "FINISH" in s:

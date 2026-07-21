@@ -32,9 +32,13 @@ ARTIFACTS = os.path.join(ROOT, "artifacts")
 SHOTS = os.path.join(ARTIFACTS, "shots")
 FRAMES = os.path.join(ARTIFACTS, "frames")
 ADB = os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
-MAX_FRAMES = 150          # 캡처 상한(디스크/시간 보호)
-GIF_MAX = 60              # GIF 프레임 상한(초과 시 균등 샘플)
+# 캡처 상한: 실행 전체를 담기 위해 충분히 크게(2초 간격 → 1000=약 33분).
+# 종료 시 GIF_MAX 로 균등 샘플하므로 전체 구간이 타임랩스로 압축됨.
+MAX_FRAMES = int(os.environ.get("PLUSRUN_MAX_FRAMES", "1000"))
+FRAME_INTERVAL = float(os.environ.get("PLUSRUN_FRAME_INTERVAL", "2"))
+GIF_MAX = int(os.environ.get("PLUSRUN_GIF_MAX", "60"))  # GIF 프레임 상한(초과 시 균등 샘플)
 _lock = threading.Lock()
+RUNNING = {}  # run_id -> {proc, stop_ev, stopped} : 실행중 테스트(중지 버튼용)
 
 
 def _device():
@@ -58,14 +62,15 @@ def _capture(run_id):
         return False
 
 
-def _grab_png(device):
+def _grab_png(device, timeout=20):
     p = subprocess.run([ADB, "-s", device, "exec-out", "screencap", "-p"],
-                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15)
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=timeout)
     return p.stdout
 
 
 def _capture_frames(run_id, stop_ev):
-    """실행 중 2초마다 화면을 캡처(다운스케일)해 GIF 프레임으로 저장."""
+    """실행 중 일정 간격으로 화면 캡처(다운스케일)해 GIF 프레임 저장.
+    screencap 실패 시 1회 재시도하고 진행 로그를 남긴다(coverage 진단용)."""
     try:
         from PIL import Image
         from io import BytesIO
@@ -74,17 +79,25 @@ def _capture_frames(run_id, stop_ev):
     dev = _device()
     d = os.path.join(FRAMES, run_id)
     os.makedirs(d, exist_ok=True)
-    i = 0
-    while not stop_ev.is_set() and i < MAX_FRAMES:
-        try:
-            raw = _grab_png(dev)
-            im = Image.open(BytesIO(raw)).convert("RGB")
-            im.thumbnail((360, 800))
-            im.save(os.path.join(d, f"{i:04d}.png"))
-            i += 1
-        except Exception:
-            pass
-        stop_ev.wait(2)
+    logf = os.path.join(ARTIFACTS, f"cap_{run_id}.log")
+    ok = fail = i = 0
+    with open(logf, "w") as lg:
+        lg.write(f"start {dt.datetime.now():%H:%M:%S}\n"); lg.flush()
+        while not stop_ev.is_set() and i < MAX_FRAMES:
+            got = False
+            for _try in range(2):                    # 실패 시 1회 재시도
+                try:
+                    raw = _grab_png(dev)
+                    im = Image.open(BytesIO(raw)).convert("RGB")
+                    im.thumbnail((360, 800))
+                    im.save(os.path.join(d, f"{i:04d}.png"))
+                    i += 1; ok += 1; got = True
+                    break
+                except Exception as e:
+                    fail += 1
+                    lg.write(f"{dt.datetime.now():%H:%M:%S} fail#{fail}: {type(e).__name__}\n"); lg.flush()
+            stop_ev.wait(FRAME_INTERVAL if got else 1)
+        lg.write(f"end {dt.datetime.now():%H:%M:%S} ok={ok} fail={fail}\n")
 
 
 def _make_gif(run_id):
@@ -246,14 +259,30 @@ def _run_worker(run_id, tc):
     stop_ev = threading.Event()
     cap = threading.Thread(target=_capture_frames, args=(run_id, stop_ev), daemon=True)
     cap.start()
-    proc = subprocess.run(
+    # 중지 버튼으로 종료할 수 있도록 프로세스 그룹으로 실행 + 레지스트리 등록
+    proc = subprocess.Popen(
         [sys.executable, "-m", "pytest", "tests/test_from_excel.py",
          "-k", tc, f"--junitxml={junit}", "-q"],
         cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+        start_new_session=True,
     )
+    with _lock:
+        RUNNING[run_id] = {"proc": proc, "stop_ev": stop_ev}
+    proc.wait()
+    stopped = False
+    with _lock:
+        info = RUNNING.pop(run_id, None)
+        stopped = bool(info and info.get("stopped"))
     stop_ev.set()
     cap.join(timeout=5)
     dur = round(time.time() - t0, 1)
+    if stopped:  # 사용자가 중지한 경우
+        made_gif = _make_gif(run_id)
+        has_shot = made_gif or os.path.exists(os.path.join(SHOTS, run_id + ".png"))
+        _update_run(run_id, status="stopped", duration=dur, has_gif=made_gif,
+                    ended=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    detail="사용자가 중지함", has_shot=has_shot)
+        return
     status, detail = "fail", ""
     try:
         root = ET.parse(junit).getroot()
@@ -289,6 +318,37 @@ def api_shot(run_id):
         if os.path.exists(os.path.join(SHOTS, run_id + ext)):
             return send_from_directory(SHOTS, run_id + ext)
     abort(404)
+
+
+@app.route("/api/stop/<run_id>", methods=["POST"])
+def api_stop(run_id):
+    """실행중인 테스트 중지: pytest 프로세스 그룹 종료."""
+    import signal
+    with _lock:
+        info = RUNNING.get(run_id)
+        if info:
+            info["stopped"] = True
+    if not info:
+        return jsonify({"ok": False, "error": "실행중인 테스트가 아닙니다(이미 종료됨)"}), 400
+    proc = info["proc"]
+    info["stop_ev"].set()
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    # 잠깐 뒤에도 살아있으면 강제 종료
+    def _force():
+        time.sleep(5)
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                pass
+    threading.Thread(target=_force, daemon=True).start()
+    return jsonify({"ok": True, "run_id": run_id})
 
 
 @app.route("/api/run/<tc>", methods=["POST"])
