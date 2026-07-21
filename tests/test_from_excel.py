@@ -29,3 +29,14 @@ def test_excel_case(driver, config, artifacts_dir, tc_id, name, steps):
             runner.run_step(action, target)
     finally:
         shot(driver, artifacts_dir, f"{tc_id}.png")
+        # 대시보드 실행 결과 화면용: 실행(앱 살아있는) 시점의 스크린샷을 run_id 로 저장
+        run_id = os.environ.get("PLUSRUN_RUN_ID")
+        if run_id:
+            import os as _os
+            root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+            shots = _os.path.join(root, "artifacts", "shots")
+            _os.makedirs(shots, exist_ok=True)
+            try:
+                driver.save_screenshot(_os.path.join(shots, run_id + ".png"))
+            except Exception:
+                pass

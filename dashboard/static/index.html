@@ -43,6 +43,9 @@
   .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;}
   .b-pass{background:#dcfce7;color:#15803d;} .b-fail{background:#fee2e2;color:#b91c1c;}
   .b-running{background:#fef9c3;color:#a16207;} .b-none,.b-skipped{background:#e2e8f0;color:#475569;}
+  #view-results{overflow:auto;}
+  #view-results table th, #view-results table td{white-space:nowrap;}         /* 줄바꿈 방지 */
+  #view-results table td.detail{white-space:normal;max-width:420px;}          /* 상세만 줄바꿈 허용 */
   .results-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
   .stat{display:flex;gap:10px;} .stat .card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 16px;min-width:80px;}
   .stat .card b{display:block;font-size:20px;} .stat .card span{font-size:11px;color:#64748b;}
@@ -88,7 +91,7 @@
     <button class="pri" onclick="loadHistory()">새로고침</button>
   </div>
   <table>
-    <thead><tr><th>결과</th><th>TC</th><th>시작 시각</th><th>종료 시각</th><th>소요(초)</th><th>상세</th></tr></thead>
+    <thead><tr><th>결과</th><th>TC</th><th>시작 시각</th><th>종료 시각</th><th>소요(초)</th><th>화면</th><th>상세</th></tr></thead>
     <tbody id="histBody"></tbody>
   </table>
 </div>
@@ -101,6 +104,20 @@
     <button class="newbtn" onclick="newAction()">+ 새 액션(코드) 추가</button>
   </div>
   <div class="right" id="actEditor"><div class="empty">액션을 선택하면 Python 코드가 표시됩니다.</div></div>
+</div>
+
+<!-- 스크린샷 모달 -->
+<div id="shotModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20;align-items:center;justify-content:center;" onclick="closeShot()">
+  <div style="background:#fff;border-radius:10px;padding:14px;max-height:92vh;max-width:92vw;overflow:auto" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b id="shotTitle" style="font-size:14px"></b>
+      <div style="display:flex;gap:8px">
+        <button class="run" onclick="replayShot()">↺ 재실행</button>
+        <button class="pri" onclick="closeShot()">닫기</button>
+      </div>
+    </div>
+    <img id="shotImg" style="max-height:80vh;max-width:86vw;border-radius:6px;display:block">
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -257,9 +274,24 @@ async function loadHistory(){
   document.getElementById('histBody').innerHTML = h.map(r=>`
     <tr><td><span class="badge b-${r.status}">${label[r.status]||r.status}</span></td>
       <td><b>${esc(r.tc)}</b></td><td>${esc(r.started||'')}</td><td>${esc(r.ended||'-')}</td>
-      <td>${r.duration!=null?r.duration:'-'}</td><td style="color:#94a3b8;font-size:12px">${esc(r.detail||'')}</td></tr>`).join('')
-    || '<tr><td colspan=6 style="color:#94a3b8;padding:16px">실행 이력이 없습니다.</td></tr>';
+      <td>${r.duration!=null?r.duration:'-'}</td>
+      <td>${r.has_shot?`<button class="run" style="padding:5px 12px" onclick="showShot('${esc(r.id)}','${esc(r.tc)} · ${esc(r.ended||'')}${r.has_gif?' · GIF':''}')">${r.has_gif?'🎞':'🖼'} 보기</button>`:'<span style="color:#cbd5e1">-</span>'}</td>
+      <td class="detail" style="color:#94a3b8;font-size:12px">${esc(r.detail||'')}</td></tr>`).join('')
+    || '<tr><td colspan=7 style="color:#94a3b8;padding:16px">실행 이력이 없습니다.</td></tr>';
 }
+let curShotId=null;
+function showShot(runId, title){
+  curShotId=runId;
+  document.getElementById('shotTitle').textContent=title;
+  document.getElementById('shotImg').src='/api/shot/'+encodeURIComponent(runId)+'?t='+Date.now();
+  document.getElementById('shotModal').style.display='flex';
+}
+function replayShot(){  // src 재설정 → GIF 처음부터 1회 재생
+  if(!curShotId) return;
+  const img=document.getElementById('shotImg');
+  img.src=''; img.src='/api/shot/'+encodeURIComponent(curShotId)+'?t='+Date.now();
+}
+function closeShot(){ document.getElementById('shotModal').style.display='none'; }
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
 boot();

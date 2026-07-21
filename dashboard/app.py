@@ -16,7 +16,9 @@ import subprocess
 import datetime as dt
 import xml.etree.ElementTree as ET
 
-from flask import Flask, jsonify, request, send_from_directory
+import re as _re
+import yaml
+from flask import Flask, jsonify, request, send_from_directory, abort
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -27,7 +29,90 @@ from lib.keywords import ACTIONS       # noqa: E402
 XLSX = os.path.join(ROOT, "data", "testcases.xlsx")
 HISTORY = os.path.join(ROOT, "data", "run_history.json")
 ARTIFACTS = os.path.join(ROOT, "artifacts")
+SHOTS = os.path.join(ARTIFACTS, "shots")
+FRAMES = os.path.join(ARTIFACTS, "frames")
+ADB = os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
+MAX_FRAMES = 150          # 캡처 상한(디스크/시간 보호)
+GIF_MAX = 60              # GIF 프레임 상한(초과 시 균등 샘플)
 _lock = threading.Lock()
+
+
+def _device():
+    try:
+        with open(os.path.join(ROOT, "config.yaml"), encoding="utf-8") as f:
+            return os.environ.get("PLUSRUN_DEVICE", yaml.safe_load(f).get("device", "emulator-5554"))
+    except Exception:
+        return "emulator-5554"
+
+
+def _capture(run_id):
+    """실행 종료 시점의 기기 화면을 artifacts/shots/<run_id>.png 로 캡처(폴백)."""
+    os.makedirs(SHOTS, exist_ok=True)
+    path = os.path.join(SHOTS, run_id + ".png")
+    try:
+        with open(path, "wb") as f:
+            subprocess.run([ADB, "-s", _device(), "exec-out", "screencap", "-p"],
+                           stdout=f, stderr=subprocess.DEVNULL, timeout=15)
+        return os.path.getsize(path) > 0
+    except Exception:
+        return False
+
+
+def _grab_png(device):
+    p = subprocess.run([ADB, "-s", device, "exec-out", "screencap", "-p"],
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15)
+    return p.stdout
+
+
+def _capture_frames(run_id, stop_ev):
+    """실행 중 2초마다 화면을 캡처(다운스케일)해 GIF 프레임으로 저장."""
+    try:
+        from PIL import Image
+        from io import BytesIO
+    except Exception:
+        return
+    dev = _device()
+    d = os.path.join(FRAMES, run_id)
+    os.makedirs(d, exist_ok=True)
+    i = 0
+    while not stop_ev.is_set() and i < MAX_FRAMES:
+        try:
+            raw = _grab_png(dev)
+            im = Image.open(BytesIO(raw)).convert("RGB")
+            im.thumbnail((360, 800))
+            im.save(os.path.join(d, f"{i:04d}.png"))
+            i += 1
+        except Exception:
+            pass
+        stop_ev.wait(2)
+
+
+def _make_gif(run_id):
+    """캡처한 프레임들을 artifacts/shots/<run_id>.gif 로 합성."""
+    try:
+        from PIL import Image
+        import glob as _glob
+        import shutil as _shutil
+    except Exception:
+        return False
+    d = os.path.join(FRAMES, run_id)
+    files = sorted(_glob.glob(os.path.join(d, "*.png")))
+    if len(files) < 2:
+        return False
+    if len(files) > GIF_MAX:  # 균등 샘플
+        idx = sorted({round(k * (len(files) - 1) / (GIF_MAX - 1)) for k in range(GIF_MAX)})
+        files = [files[j] for j in idx]
+    try:
+        frames = [Image.open(f).convert("P", palette=Image.ADAPTIVE) for f in files]
+        os.makedirs(SHOTS, exist_ok=True)
+        gif = os.path.join(SHOTS, run_id + ".gif")
+        # loop 미지정 → 1회만 재생하고 멈춤(재생 반복은 프론트 '재실행' 버튼으로)
+        frames[0].save(gif, save_all=True, append_images=frames[1:],
+                       duration=450, optimize=True, disposal=2)
+        _shutil.rmtree(d, ignore_errors=True)  # 프레임 정리
+        return True
+    except Exception:
+        return False
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), "static"))
 
@@ -156,11 +241,18 @@ def _run_worker(run_id, tc):
     junit = os.path.join(ARTIFACTS, f"junit_{run_id}.xml")
     os.makedirs(ARTIFACTS, exist_ok=True)
     t0 = time.time()
+    env = {**os.environ, "PLUSRUN_RUN_ID": run_id}  # 테스트가 이 id로 스크린샷 저장
+    # 실행 중 프레임 캡처(GIF용) 시작
+    stop_ev = threading.Event()
+    cap = threading.Thread(target=_capture_frames, args=(run_id, stop_ev), daemon=True)
+    cap.start()
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/test_from_excel.py",
          "-k", tc, f"--junitxml={junit}", "-q"],
-        cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
     )
+    stop_ev.set()
+    cap.join(timeout=5)
     dur = round(time.time() - t0, 1)
     status, detail = "fail", ""
     try:
@@ -181,8 +273,22 @@ def _run_worker(run_id, tc):
     except Exception as e:
         status = "pass" if proc.returncode == 0 else "fail"
         detail = f"(junit 파싱 실패: {e})"
-    _update_run(run_id, status=status, duration=dur,
-                ended=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), detail=detail)
+    # GIF 합성(프레임 2장 이상) → 실패 시 단일 스크린샷(테스트 저장분/폴백)
+    made_gif = _make_gif(run_id)
+    has_shot = made_gif or os.path.exists(os.path.join(SHOTS, run_id + ".png")) or _capture(run_id)
+    _update_run(run_id, status=status, duration=dur, has_gif=made_gif,
+                ended=dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                detail=detail, has_shot=has_shot)
+
+
+@app.route("/api/shot/<run_id>")
+def api_shot(run_id):
+    if not _re.match(r"^[\w.\-]+$", run_id):
+        abort(400)
+    for ext in (".gif", ".png"):   # GIF 우선, 없으면 단일 스크린샷
+        if os.path.exists(os.path.join(SHOTS, run_id + ext)):
+            return send_from_directory(SHOTS, run_id + ext)
+    abort(404)
 
 
 @app.route("/api/run/<tc>", methods=["POST"])
@@ -190,7 +296,7 @@ def api_run(tc):
     run_id = dt.datetime.now().strftime("%Y%m%d_%H%M%S_") + tc
     rec = {"id": run_id, "tc": tc, "status": "running", "duration": None,
            "started": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-           "ended": None, "detail": ""}
+           "ended": None, "detail": "", "has_shot": False, "has_gif": False}
     with _lock:
         items = _load_history()
         items.append(rec)
