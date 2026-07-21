@@ -179,7 +179,17 @@ class KeywordRunner:
         raise AssertionError("play_gpx: 완주/결과 화면에 도달하지 못함")
 
     def run_step(self, action, target):
-        fn = getattr(self, action, None)
-        if fn is None:
-            raise AssertionError(f"알 수 없는 action: {action}")
-        fn(target)
+        # 내장 액션(레지스트리에 등록된 것)만 메서드로 디스패치
+        if action in ACTIONS:
+            getattr(self, action)(target)
+            return
+        # 사용자 정의 액션(custom_actions.py) 디스패치
+        try:
+            from lib.actionstore import load_custom_funcs
+            funcs = load_custom_funcs()
+        except Exception:
+            funcs = {}
+        if action in funcs:
+            funcs[action](self, target)
+            return
+        raise AssertionError(f"알 수 없는 action: {action}")

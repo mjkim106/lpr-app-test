@@ -21,6 +21,7 @@ from flask import Flask, jsonify, request, send_from_directory
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from lib import casestore              # noqa: E402
+from lib import actionstore            # noqa: E402
 from lib.keywords import ACTIONS       # noqa: E402
 
 XLSX = os.path.join(ROOT, "data", "testcases.xlsx")
@@ -66,7 +67,43 @@ def index():
 
 @app.route("/api/actions")
 def api_actions():
-    return jsonify(ACTIONS)
+    # 케이스 편집기용: {name: meta} (내장+사용자 통합)
+    merged = {}
+    for a in actionstore.list_all():
+        merged[a["name"]] = {"desc": a["desc"], "needs_target": a["needs_target"],
+                             "target_hint": a["target_hint"], "type": a["type"]}
+    return jsonify(merged)
+
+
+@app.route("/api/actions/list")
+def api_actions_list():
+    # 액션 관리 화면용: 배열(type 포함)
+    return jsonify(actionstore.list_all())
+
+
+@app.route("/api/actions/<name>/code")
+def api_action_code(name):
+    return jsonify(actionstore.get_code(name))
+
+
+@app.route("/api/actions", methods=["POST"])
+def api_action_upsert():
+    d = request.get_json(force=True)
+    try:
+        actionstore.upsert(d["name"], d["code"], d.get("desc", ""),
+                           d.get("needs_target", True), d.get("target_hint", ""))
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@app.route("/api/actions/<name>", methods=["DELETE"])
+def api_action_delete(name):
+    try:
+        actionstore.delete(name)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.route("/api/cases")
